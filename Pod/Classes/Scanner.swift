@@ -97,7 +97,7 @@ public class Scanner: NSObject {
     }
     
     //MARK: Internal Class
-    class var beacons: [Beacon] {
+    public class var beacons: [Beacon] {
         get {
             var orderedBeacons = [Beacon]()
             

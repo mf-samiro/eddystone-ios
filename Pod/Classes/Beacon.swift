@@ -20,10 +20,25 @@ public class Beacon {
         tlm: TlmFrame?
     ) = (nil,nil,nil)
     
+    public var urlIdentifier: NSURL {
+        get {
+            if (frames.url != nil)
+            {
+                return frames.url!.url
+            }
+            else
+            {
+                return NSURL()
+            }
+        }
+    }
+    
     //MARK: Properties
-    var txPower: Int
-    var identifier: String
-    var rssi: Double {
+    public var txPower: Int
+    public var rssiValid: Double
+    public var rssiBrut: Double
+    public var identifier: String
+    public var rssi: Double {
         get {
             var totalRssi: Double = 0
             for rssi in self.rssiBuffer {
@@ -32,13 +47,17 @@ public class Beacon {
             
             let average: Double = totalRssi / Double(self.rssiBuffer.count)
             return average
+            //return self.rssiBrut
         }
     }
-    var signalStrength: SignalStrength = .Unknown
+    public var signalStrength: SignalStrength = .Unknown
     var rssiBuffer = [Double]()
-    var distance: Double {
+    var rssiBuffer10 = [Double]()
+    public var distance: Double {
         get {
-            return Beacon.calculateAccuracy(txPower: self.txPower, rssi: self.rssi)
+            //return Beacon.calculateAccuracy(txPower: self.txPower, rssi: self.rssi)
+            return Beacon.calculateDistance(self.txPower, rssi: self.rssi)
+            //return Beacon.calculateDistance(-21, rssi: -89.0)
         }
     }
     
@@ -46,6 +65,8 @@ public class Beacon {
     init(rssi: Double, txPower: Int, identifier: String) {
         self.txPower = txPower
         self.identifier = identifier
+        self.rssiBrut = rssi
+        self.rssiValid = rssi
         
         self.updateRssi(rssi)
     }
@@ -58,9 +79,24 @@ public class Beacon {
     
     //MARK: Functions
     func updateRssi(newRssi: Double) -> Bool {
-        self.rssiBuffer.insert(newRssi, atIndex: 0)
+        self.rssiBrut = newRssi
+        if (newRssi <= 20.0 && newRssi >= -100.0)
+        {
+            self.rssiValid = newRssi
+            self.rssiBuffer.insert(newRssi, atIndex: 0)
+            self.rssiBuffer10.insert(newRssi, atIndex: 0)
+        }
+        
         if self.rssiBuffer.count >= 20 {
+            //self.rssiBuffer.sortInPlace()
+            //self.rssiBuffer.removeFirst()
             self.rssiBuffer.removeLast()
+        }
+        
+        if self.rssiBuffer10.count >= 20 {
+            //self.rssiBuffer10.sortInPlace()
+            //self.rssiBuffer10.removeFirst()
+            self.rssiBuffer10.removeLast()
         }
         
         let signalStrength = Beacon.calculateSignalStrength(self.distance)
@@ -70,6 +106,10 @@ public class Beacon {
         }
         
         return false
+    }
+    
+    class func calculateDistance(txPower: Int, rssi: Double) -> Double {
+        return pow(10, ((Double(txPower) - rssi) - 41) / 20.0);
     }
     
     //MARK: Calculations
@@ -101,12 +141,18 @@ public class Beacon {
             return .VeryLow
         }
     }
-
+    
+    func byteConversion(bytes: [UInt8]) -> [Byte]?{
+        return bytes.map { byte in
+            return Byte(byte)
+        }
+    }
+    
     //MARK: Advertisement Data
     func parseAdvertisementData(advertisementData: [NSObject : AnyObject], rssi: Double) {
         self.updateRssi(rssi)
-        
-        if let bytes = Beacon.bytesFromAdvertisementData(advertisementData) {
+        let byteTemp = Beacon.bytesFromAdvertisementData(advertisementData)
+        if let bytes = byteConversion(byteTemp!) {
             if let type = Beacon.frameTypeFromBytes(bytes) {
                 switch type {
                 case .URL:
@@ -139,13 +185,13 @@ public class Beacon {
     //MARK: Bytes
     class func beaconWithAdvertisementData(advertisementData: [NSObject : AnyObject], rssi: Double, identifier: String) -> Beacon? {
         var txPower: Int?
-        var type: FrameType?
+        //var type: FrameType?
 
         if let bytes = Beacon.bytesFromAdvertisementData(advertisementData) {
-            type = Beacon.frameTypeFromBytes(bytes)
+            //type = Beacon.frameTypeFromBytes(bytes)
             txPower = Beacon.txPowerFromBytes(bytes)
             
-            if let txPower = txPower where type != nil {
+            if let txPower = txPower /*where type != nil*/ {
                 let beacon = Beacon(rssi: rssi, txPower: txPower, identifier: identifier)
                 beacon.parseAdvertisementData(advertisementData, rssi: rssi)
                 return beacon
@@ -156,15 +202,16 @@ public class Beacon {
         return nil
     }
     
-    class func bytesFromAdvertisementData(advertisementData: [NSObject : AnyObject]) -> [Byte]? {
+    class func bytesFromAdvertisementData(advertisementData: [NSObject : AnyObject]) -> [UInt8]? {
         if let serviceData = advertisementData[CBAdvertisementDataServiceDataKey] as? [NSObject: AnyObject] {
             if let urlData = serviceData[Scanner.eddystoneServiceUUID] as? NSData {
-                let count = urlData.length / sizeof(UInt8)
+                let count = urlData.length
                 var bytes = [UInt8](count: count, repeatedValue: 0)
-                urlData.getBytes(&bytes, length:count * sizeof(UInt8))
-                return bytes.map { byte in
+                urlData.getBytes(&bytes, length:count)
+                /*return bytes.map { byte in
                     return Byte(byte)
-                }
+                }*/
+                return bytes
             }
         }
         
@@ -188,13 +235,14 @@ public class Beacon {
         return nil
     }
     
-    class func txPowerFromBytes(bytes: [Byte]) -> Int? {
+    class func txPowerFromBytes(bytes: [UInt8]) -> Int? {
         if bytes.count >= 2 {
-            if let type = Beacon.frameTypeFromBytes(bytes) {
-                if type == .UID || type == .URL {
-                    return Int(bytes[1])
-                }
-            }
+            //if let type = Beacon.frameTypeFromBytes(bytes) {
+                //if type == .UID || type == .URL {
+                    //return Int(bytes[1])
+                    return Int(Int8(bitPattern:bytes[1]))
+                //}
+            //}
         }
         
         return nil
